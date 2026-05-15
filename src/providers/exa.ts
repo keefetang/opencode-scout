@@ -48,10 +48,6 @@ export function createExaProvider(apiKey: string): SearchProvider {
   return {
     name: "exa",
 
-    isAvailable(): boolean {
-      return true;
-    },
-
     async search(query: string, options: SearchOptions): Promise<SearchResult> {
       const includeContent = options.includeContent === true;
       const numResults = options.numResults ?? 5;
@@ -83,7 +79,7 @@ export function createExaProvider(apiKey: string): SearchProvider {
       if (!response.ok) {
         const text = await response.text().catch(() => "");
         throw new Error(
-          `Exa API error (${response.status}): ${text || response.statusText}`,
+          `Exa API error (${response.status}): ${(text || response.statusText).slice(0, 200)}`,
         );
       }
 

@@ -145,10 +145,6 @@ export function createGeminiProvider(
   return {
     name: "gemini",
 
-    isAvailable(): boolean {
-      return true;
-    },
-
     // numResults is ignored — Gemini's grounding API controls its own
     // source count. The option only applies to Exa.
     async search(query: string, options: SearchOptions): Promise<SearchResult> {
@@ -159,11 +155,14 @@ export function createGeminiProvider(
 
       // ----- 1. Call the Gemini API with search grounding -----
 
-      const url = `${API_BASE}/models/${model}:generateContent?key=${apiKey}`;
+      const url = `${API_BASE}/models/${model}:generateContent`;
 
       const res = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
         body: JSON.stringify({
           contents: [{ parts: [{ text: query }] }],
           tools: [{ google_search: {} }],

@@ -3,9 +3,10 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   statSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 
 import { tool } from "@opencode-ai/plugin/tool";
@@ -59,6 +60,11 @@ export function createCloneRepoTool(config: WebAccessConfig): ToolDefinition {
         const focusPath = args.path ?? normalized.focusPath;
         const branch = args.branch ?? normalized.branch;
 
+        // Guard: reject branch names that look like git options.
+        if (branch && branch.startsWith("-")) {
+          return "Error: Invalid branch name.";
+        }
+
         // --- 2. Cache directory ---
         const hash = createHash("sha256")
           .update(normalized.cloneUrl)
@@ -80,7 +86,9 @@ export function createCloneRepoTool(config: WebAccessConfig): ToolDefinition {
           // Remove stale cache if force-recloning
           if (existsSync(cacheDir)) {
             // Safety: only rm inside the expected cache directory
-            if (!cacheDir.startsWith(config.clone.cachePath)) {
+            const resolvedCacheDir = resolve(cacheDir);
+            const resolvedCacheRoot = resolve(config.clone.cachePath);
+            if (!resolvedCacheDir.startsWith(resolvedCacheRoot + "/")) {
               return "Error: Cache directory path is outside expected cache root. Aborting.";
             }
             await runCommand("rm", ["-rf", cacheDir], {
@@ -98,7 +106,7 @@ export function createCloneRepoTool(config: WebAccessConfig): ToolDefinition {
           if (branch) {
             cloneArgs.push("--branch", branch);
           }
-          cloneArgs.push(normalized.cloneUrl, cacheDir);
+          cloneArgs.push("--", normalized.cloneUrl, cacheDir);
 
           const result = await runCommand("git", cloneArgs, {
             timeoutMs: config.clone.timeoutSeconds * 1000,
@@ -129,8 +137,22 @@ export function createCloneRepoTool(config: WebAccessConfig): ToolDefinition {
           ? join(cacheDir, focusPath)
           : undefined;
 
+        // Guard: focusPath must resolve within the cache directory.
+        // Two layers: resolve() catches ".." traversal (works pre-existence),
+        // realpathSync() catches symlink escapes (works post-existence).
+        if (focusFullPath) {
+          if (!isPathWithinRoot(focusFullPath, cacheDir)) {
+            return "Error: Path escapes repository boundary.";
+          }
+        }
+
         // If focusPath points to a file, return its content directly
         if (focusFullPath && existsSync(focusFullPath)) {
+          // Symlink-aware check now that the path exists on disk.
+          if (!isRealPathWithinRoot(focusFullPath, cacheDir)) {
+            return "Error: Path escapes repository boundary.";
+          }
+
           try {
             const stat = statSync(focusFullPath);
             if (stat.isFile()) {
@@ -157,10 +179,13 @@ export function createCloneRepoTool(config: WebAccessConfig): ToolDefinition {
         }
 
         // Tree listing — scoped to focusPath if it's a directory
-        const treeTarget =
-          focusFullPath && existsSync(focusFullPath)
+        let treeTarget = cacheDir;
+        if (focusFullPath && existsSync(focusFullPath)) {
+          // Symlink-aware check before using focusFullPath for tree listing.
+          treeTarget = isRealPathWithinRoot(focusFullPath, cacheDir)
             ? focusFullPath
             : cacheDir;
+        }
 
         const treeHeader = focusPath
           ? `## Directory: ${focusPath}`
@@ -192,6 +217,41 @@ export function createCloneRepoTool(config: WebAccessConfig): ToolDefinition {
       }
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Path safety helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * String-level check: does `target` resolve within `root`?
+ * Catches `..` traversal. Does NOT follow symlinks.
+ */
+function isPathWithinRoot(target: string, root: string): boolean {
+  const resolvedTarget = resolve(target);
+  const resolvedRoot = resolve(root);
+  return (
+    resolvedTarget === resolvedRoot ||
+    resolvedTarget.startsWith(resolvedRoot + "/")
+  );
+}
+
+/**
+ * Filesystem-level check: does `target`'s real path (symlinks resolved)
+ * stay within `root`? Both paths must exist on disk.
+ * Returns `false` if either path doesn't exist.
+ */
+function isRealPathWithinRoot(target: string, root: string): boolean {
+  try {
+    const realTarget = realpathSync(target);
+    const realRoot = realpathSync(root);
+    return (
+      realTarget === realRoot || realTarget.startsWith(realRoot + "/")
+    );
+  } catch {
+    // Path doesn't exist — safe to reject.
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +416,7 @@ function findAndReadReadme(dir: string): string | undefined {
   const names = ["README.md", "README", "readme.md", "Readme.md"];
   for (const name of names) {
     const fullPath = join(dir, name);
-    if (existsSync(fullPath)) {
+    if (existsSync(fullPath) && isRealPathWithinRoot(fullPath, dir)) {
       return readFileSafe(fullPath);
     }
   }

@@ -4,6 +4,7 @@ import type { ToolDefinition } from "@opencode-ai/plugin/tool";
 import type { WebAccessConfig } from "../config.ts";
 import { createExaProvider } from "../providers/exa";
 import { createGeminiProvider } from "../providers/gemini";
+import { createTinyFishProvider } from "../providers/tinyfish";
 import type { SearchProvider, SearchResult } from "../providers/types.ts";
 
 const z = tool.schema;
@@ -47,14 +48,10 @@ function formatResultForLLM(result: SearchResult): string {
 
   if (hasSourcesBlock) {
     // Still want cloneable tags — append them as a supplement.
-    const cloneableUrls = result.sources
-      .filter((s) => s.cloneable)
-      .map((s) => `- ${s.url}`)
-      .join("\n");
-
+    const cloneableSources = result.sources.filter((s) => s.cloneable);
     const cloneableSection =
-      cloneableUrls.length > 0
-        ? `\n\nCloneable repositories:\n${cloneableUrls}`
+      cloneableSources.length > 0
+        ? `\n\nCloneable repositories:\n${cloneableSources.map((s) => `- ${s.url}`).join("\n")}`
         : "";
 
     return `${header}\n\n${body}${cloneableSection}`;
@@ -76,6 +73,9 @@ function buildProviders(config: WebAccessConfig): Map<string, SearchProvider> {
 
   if (config.exaApiKey) {
     providers.set("exa", createExaProvider(config.exaApiKey));
+  }
+  if (config.tinyFishApiKey) {
+    providers.set("tinyfish", createTinyFishProvider(config.tinyFishApiKey));
   }
   if (config.geminiApiKey) {
     providers.set(
@@ -99,16 +99,16 @@ export function createWebSearchTool(config: WebAccessConfig): ToolDefinition {
 
   return tool({
     description:
-      "Search the web using Exa or Gemini. Returns answers with source citations. " +
+      "Search the web using Exa, TinyFish, or Gemini. Returns answers with source citations. " +
       "Use `includeContent: true` with Exa to get full page content in one call. " +
       "For Gemini results, use the built-in webfetch tool on source URLs to get page content.",
     args: {
       query: z.string().describe("Search query"),
       provider: z
-        .enum(["auto", "exa", "gemini"])
+        .enum(["auto", "exa", "tinyfish", "gemini"])
         .optional()
         .describe(
-          "Search provider. Omit to use the configured default (auto tries Exa then Gemini).",
+          "Search provider. Omit to use the configured default (auto tries Exa → TinyFish → Gemini).",
         ),
       numResults: z
         .number()
@@ -132,9 +132,11 @@ export function createWebSearchTool(config: WebAccessConfig): ToolDefinition {
         const chain: SearchProvider[] = [];
 
         if (requestedProvider === "auto") {
-          // Fallback chain: Exa → Gemini (skip unavailable).
+          // Fallback chain: Exa → TinyFish → Gemini (skip unavailable).
           const exa = providers.get("exa");
           if (exa) chain.push(exa);
+          const tinyfish = providers.get("tinyfish");
+          if (tinyfish) chain.push(tinyfish);
           const gemini = providers.get("gemini");
           if (gemini) chain.push(gemini);
         } else {
@@ -143,10 +145,20 @@ export function createWebSearchTool(config: WebAccessConfig): ToolDefinition {
           if (provider) {
             chain.push(provider);
           } else {
+            const envVars: Record<string, string> = {
+              exa: "EXA_API_KEY",
+              tinyfish: "TINYFISH_API_KEY",
+              gemini: "GEMINI_API_KEY",
+            };
+            const configKeys: Record<string, string> = {
+              exa: "exaApiKey",
+              tinyfish: "tinyFishApiKey",
+              gemini: "geminiApiKey",
+            };
             return (
               `Error: ${requestedProvider} provider requested but no API key configured. ` +
-              `Set ${requestedProvider === "exa" ? "EXA_API_KEY" : "GEMINI_API_KEY"} env var ` +
-              `or add ${requestedProvider === "exa" ? "exaApiKey" : "geminiApiKey"} to ~/.config/opencode/web-access.json`
+              `Set ${envVars[requestedProvider] ?? requestedProvider.toUpperCase() + "_API_KEY"} env var ` +
+              `or add ${configKeys[requestedProvider] ?? requestedProvider + "ApiKey"} to ~/.config/opencode/web-access.json`
             );
           }
         }
@@ -155,6 +167,7 @@ export function createWebSearchTool(config: WebAccessConfig): ToolDefinition {
           return (
             "Error: No search providers available. Configure at least one API key:\n" +
             "- EXA_API_KEY (env var) or exaApiKey (in ~/.config/opencode/web-access.json)\n" +
+            "- TINYFISH_API_KEY (env var) or tinyFishApiKey (in ~/.config/opencode/web-access.json)\n" +
             "- GEMINI_API_KEY (env var) or geminiApiKey (in ~/.config/opencode/web-access.json)"
           );
         }

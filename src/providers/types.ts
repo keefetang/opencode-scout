@@ -1,6 +1,5 @@
 export interface SearchProvider {
   name: string;
-  isAvailable(): boolean;
   search(query: string, options: SearchOptions): Promise<SearchResult>;
 }
 

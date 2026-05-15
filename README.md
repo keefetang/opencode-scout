@@ -6,7 +6,7 @@ Scout fills two gaps in opencode's tool set: finding things on the web and pulli
 
 ## Tools at a Glance
 
-**`web_search`** searches the web via Exa or Gemini and returns answers with source citations. Use it when you need to find a page, not fetch one you already know about.
+**`web_search`** searches the web via Exa, TinyFish, or Gemini and returns answers with source citations. Use it when you need to find a page, not fetch one you already know about.
 
 ```
 web_search("how to configure Vite for library mode")
@@ -64,6 +64,7 @@ Scout reads configuration from two sources. Both are optional.
 
 ```bash
 export EXA_API_KEY="your-exa-api-key"
+export TINYFISH_API_KEY="your-tinyfish-api-key"
 export GEMINI_API_KEY="your-gemini-api-key"
 ```
 
@@ -74,6 +75,7 @@ export GEMINI_API_KEY="your-gemini-api-key"
 ```json
 {
   "exaApiKey": "your-exa-api-key",
+  "tinyFishApiKey": "your-tinyfish-api-key",
   "geminiApiKey": "your-gemini-api-key",
   "provider": "auto",
   "gemini": {
@@ -92,21 +94,22 @@ All fields are optional. Env vars override file values. Empty env vars are treat
 
 - **No API keys at all:** `clone_repo` works. `web_search` returns an error telling you which keys to set.
 - **Exa key only:** `web_search` uses Exa. Full page content via `includeContent` is available.
+- **TinyFish key only:** `web_search` uses TinyFish. Returns snippets only (no full content). Search is free.
 - **Gemini key only:** `web_search` uses Gemini with grounded search. No `includeContent` support (use `webfetch` on source URLs instead).
-- **Both keys:** `web_search` in `auto` mode tries Exa first, falls back to Gemini on failure.
+- **Multiple keys:** `web_search` in `auto` mode tries Exa → TinyFish → Gemini, falling back on failure.
 
 ## Tools
 
 ### web_search
 
-Search the web using Exa or Gemini. Returns answers with source citations.
+Search the web using Exa, TinyFish, or Gemini. Returns answers with source citations.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `query` | string | yes | Search query |
-| `provider` | `"auto"` \| `"exa"` \| `"gemini"` | no | Search provider. Default: `auto` (tries Exa then Gemini) |
+| `provider` | `"auto"` \| `"exa"` \| `"tinyfish"` \| `"gemini"` | no | Search provider. Default: `auto` (tries Exa → TinyFish → Gemini) |
 | `numResults` | number | no | Max results. Default: 5. Exa only. |
 | `includeContent` | boolean | no | Fetch full page content from sources. Exa only. For Gemini results, use `webfetch` on source URLs. |
 
@@ -123,7 +126,7 @@ web_search({ query: "deno kv documentation", includeContent: true })
 web_search({ query: "rust async runtime comparison", provider: "gemini" })
 ```
 
-**Provider fallback.** In `auto` mode, Scout tries Exa first. If Exa fails (network error, rate limit), it falls back to Gemini. If both fail, the error message lists what was tried.
+**Provider fallback.** In `auto` mode, Scout tries Exa first, then TinyFish, then Gemini. If a provider fails (network error, rate limit), the next one in the chain is tried. If all fail, the error message lists what was tried.
 
 **Cloneable sources.** Search results from GitHub or GitLab URLs are tagged `[cloneable]`, signaling that `clone_repo` can pull them down.
 
@@ -190,6 +193,16 @@ Exa returns raw search results with titles, URLs, and text snippets. With `inclu
 - Pay-per-search pricing
 - Best for: finding specific pages, getting full content in one call, structured results you want to process further
 
+### TinyFish
+
+TinyFish returns raw search results with titles, URLs, and short snippets (~140-160 characters). Search queries are free — no credits consumed. Supports `site:` and `-site:` operators in the query string for domain-scoped searches.
+
+- Requires an API key from [TinyFish](https://tinyfish.ai)
+- Free search (no per-query cost)
+- Returns 10 results per page, snippets only (no full page content)
+- `numResults` and `includeContent` are not supported. Use `webfetch` on source URLs to get full page content.
+- Best for: free-tier usage, quick searches when you just need URLs and snippets, domain-scoped searches with `site:` operator
+
 ### Gemini
 
 Gemini returns a synthesized answer with inline citation markers (`[1][2]`) and a Sources list with resolved URLs. It uses Google's grounding API, so results are backed by web search but presented as a coherent narrative.
@@ -209,7 +222,7 @@ Perplexity and OpenRouter providers are planned for a future release. The config
 Scout injects a one-line status indicator into the system prompt:
 
 ```
-## Scout: web_search (Exa ✓ Gemini ✓) | clone_repo ✓
+## Scout: web_search (Exa ✓ TinyFish ✓ Gemini ✓) | clone_repo ✓
 ```
 
 This tells the agent which providers are configured and available. If no API keys are set, it shows `web_search (no providers configured)`.
