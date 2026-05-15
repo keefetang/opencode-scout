@@ -1,6 +1,6 @@
 {
   "name": "opencode-scout",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "OpenCode plugin for web search and git clone — gives agents access to the outside world",
   "type": "module",
   "main": "src/index.ts",
