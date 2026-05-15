@@ -27,6 +27,16 @@ export interface NormalizedRepo {
 export function normalizeRepoUrl(input: string): NormalizedRepo {
   const trimmed = input.trim().replace(/\/+$/, "");
 
+  // Security: reject dangerous git transport schemes before any parsing.
+  // Only allow https://, http://, git@ (SSH), and bare paths (no scheme).
+  // This blocks ext:: (arbitrary command execution), file:// (local filesystem
+  // access), git:// (unauthenticated protocol), and any other scheme.
+  if (hasUnsafeScheme(trimmed)) {
+    throw new Error(
+      "Invalid repository URL: only HTTPS and SSH URLs are supported",
+    );
+  }
+
   // --- SSH URL: git@host:org/repo.git ---
   if (trimmed.startsWith("git@")) {
     return parseSshUrl(trimmed);
@@ -43,6 +53,11 @@ export function normalizeRepoUrl(input: string): NormalizedRepo {
   }
 
   // Unrecognized — pass through as-is and let git figure it out.
+  // Reject input that looks like a CLI option to prevent git option injection.
+  if (trimmed.startsWith("-")) {
+    throw new Error("Invalid repository URL");
+  }
+
   return {
     cloneUrl: trimmed,
     host: "unknown",
@@ -251,6 +266,23 @@ function parseBareHostPath(input: string): NormalizedRepo {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Returns true if the input has a URI scheme that is not in the allowlist.
+ * Allows: https://, http://, git@ (SSH syntax), and bare paths (no scheme).
+ * Blocks: file://, ext::, git://, ssh://, and any other scheme.
+ */
+function hasUnsafeScheme(input: string): boolean {
+  // git@ is SSH syntax, not a URI scheme — always safe to pass through
+  if (input.startsWith("git@")) return false;
+
+  // Check for URI scheme pattern (word followed by :// or ::)
+  const schemeMatch = input.match(/^([a-zA-Z][a-zA-Z0-9+.-]*)(::|\:\/\/)/);
+  if (!schemeMatch) return false; // No scheme — bare path, safe
+
+  const scheme = schemeMatch[1]!.toLowerCase();
+  return scheme !== "https" && scheme !== "http";
+}
 
 /** Convert host + repo path to SSH clone URL. */
 function toSshUrl(host: string, repoPath: string): string {

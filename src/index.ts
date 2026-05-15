@@ -1,13 +1,13 @@
 import type { Plugin } from "@opencode-ai/plugin";
 
-import { loadConfig } from "./config";
+import { loadConfig, type WebAccessConfig } from "./config";
 import { createCloneRepoTool } from "./tools/clone-repo";
 import { createWebSearchTool } from "./tools/web-search";
 
 /**
  * OpenCode Scout plugin.
  *
- * Gives agents access to the outside world — web search via Exa/Gemini
+ * Gives agents access to the outside world — web search via Exa/TinyFish/Gemini
  * and git clone for pulling repositories into the workspace.
  */
 export const ScoutPlugin: Plugin = async (ctx, options) => {
@@ -17,7 +17,7 @@ export const ScoutPlugin: Plugin = async (ctx, options) => {
   const cloneRepoTool = createCloneRepoTool(config);
 
   // Build provider status string once at init.
-  const providerStatus = buildProviderStatus(config.exaApiKey, config.geminiApiKey);
+  const providerStatus = buildProviderStatus(config);
 
   void ctx.client.app.log({
     body: {
@@ -52,15 +52,14 @@ export const ScoutPlugin: Plugin = async (ctx, options) => {
 };
 
 /** One-line provider availability string for system prompt and logs. */
-function buildProviderStatus(
-  exaApiKey: string | undefined,
-  geminiApiKey: string | undefined,
-): string {
-  const exa = exaApiKey ? "Exa ✓" : "Exa ✗";
-  const gemini = geminiApiKey ? "Gemini ✓" : "Gemini ✗";
+function buildProviderStatus(config: WebAccessConfig): string {
+  const exa = config.exaApiKey ? "Exa ✓" : "Exa ✗";
+  const tinyfish = config.tinyFishApiKey ? "TinyFish ✓" : "TinyFish ✗";
+  const gemini = config.geminiApiKey ? "Gemini ✓" : "Gemini ✗";
 
-  if (!exaApiKey && !geminiApiKey) return "no providers configured";
-  return `${exa} ${gemini}`;
+  if (!config.exaApiKey && !config.tinyFishApiKey && !config.geminiApiKey)
+    return "no providers configured";
+  return `${exa} ${tinyfish} ${gemini}`;
 }
 
 export default ScoutPlugin;

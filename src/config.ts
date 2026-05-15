@@ -6,10 +6,9 @@ const CONFIG_PATH = join(homedir(), ".config", "opencode", "web-access.json");
 
 export interface WebAccessConfig {
   exaApiKey?: string;
-  perplexityApiKey?: string;
+  tinyFishApiKey?: string;
   geminiApiKey?: string;
-  openrouterApiKey?: string;
-  provider: "auto" | "exa" | "gemini";
+  provider: "auto" | "exa" | "tinyfish" | "gemini";
   gemini: { model: string };
   clone: {
     cachePath: string;
@@ -21,10 +20,9 @@ export interface WebAccessConfig {
 /** Raw shape of `~/.config/opencode/web-access.json` — all fields optional. */
 interface ConfigFile {
   exaApiKey?: string;
-  perplexityApiKey?: string;
+  tinyFishApiKey?: string;
   geminiApiKey?: string;
-  openrouterApiKey?: string;
-  provider?: "auto" | "exa" | "gemini";
+  provider?: "auto" | "exa" | "tinyfish" | "gemini";
   gemini?: { model?: string };
   clone?: {
     cachePath?: string;
@@ -33,7 +31,7 @@ interface ConfigFile {
   };
 }
 
-const VALID_PROVIDERS = new Set(["auto", "exa", "gemini"]);
+const VALID_PROVIDERS = new Set(["auto", "exa", "tinyfish", "gemini"]);
 
 /** Read and validate the config file. Invalid fields are silently dropped. */
 function readConfigFile(): ConfigFile {
@@ -54,15 +52,13 @@ function readConfigFile(): ConfigFile {
   const file: ConfigFile = {};
 
   if (typeof obj["exaApiKey"] === "string") file.exaApiKey = obj["exaApiKey"];
-  if (typeof obj["perplexityApiKey"] === "string")
-    file.perplexityApiKey = obj["perplexityApiKey"];
+  if (typeof obj["tinyFishApiKey"] === "string")
+    file.tinyFishApiKey = obj["tinyFishApiKey"];
   if (typeof obj["geminiApiKey"] === "string")
     file.geminiApiKey = obj["geminiApiKey"];
-  if (typeof obj["openrouterApiKey"] === "string")
-    file.openrouterApiKey = obj["openrouterApiKey"];
 
   if (typeof obj["provider"] === "string" && VALID_PROVIDERS.has(obj["provider"]))
-    file.provider = obj["provider"] as "auto" | "exa" | "gemini";
+    file.provider = obj["provider"] as "auto" | "exa" | "tinyfish" | "gemini";
 
   const gemini = obj["gemini"];
   if (typeof gemini === "object" && gemini !== null && !Array.isArray(gemini)) {
@@ -111,16 +107,12 @@ export function loadConfig(): WebAccessConfig {
   const exaApiKey = process.env["EXA_API_KEY"] ?? file.exaApiKey;
   if (exaApiKey) config.exaApiKey = exaApiKey;
 
-  const perplexityApiKey =
-    process.env["PERPLEXITY_API_KEY"] ?? file.perplexityApiKey;
-  if (perplexityApiKey) config.perplexityApiKey = perplexityApiKey;
+  const tinyFishApiKey =
+    process.env["TINYFISH_API_KEY"] ?? file.tinyFishApiKey;
+  if (tinyFishApiKey) config.tinyFishApiKey = tinyFishApiKey;
 
   const geminiApiKey = process.env["GEMINI_API_KEY"] ?? file.geminiApiKey;
   if (geminiApiKey) config.geminiApiKey = geminiApiKey;
-
-  const openrouterApiKey =
-    process.env["OPENROUTER_API_KEY"] ?? file.openrouterApiKey;
-  if (openrouterApiKey) config.openrouterApiKey = openrouterApiKey;
 
   return config;
 }
