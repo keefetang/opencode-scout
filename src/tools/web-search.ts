@@ -2,69 +2,55 @@ import { tool } from "@opencode-ai/plugin/tool";
 import type { ToolDefinition } from "@opencode-ai/plugin/tool";
 
 import type { WebAccessConfig } from "../config.ts";
-import { createExaProvider } from "../providers/exa";
-import { createGeminiProvider } from "../providers/gemini";
-import { createTinyFishProvider } from "../providers/tinyfish";
-import type { SearchProvider, SearchResult } from "../providers/types.ts";
+import { createExaProvider } from "../providers/exa.ts";
+import { createGeminiProvider } from "../providers/gemini.ts";
+import { createTinyFishProvider } from "../providers/tinyfish.ts";
+import type {
+  ExaSearchOptions,
+  SearchProvider,
+  SearchResult,
+} from "../providers/types.ts";
 
 const z = tool.schema;
 
-/** URL patterns that indicate a cloneable git repository. */
-function isCloneableUrl(url: string): boolean {
+/** @internal Exported for testing. */
+export function isCloneableUrl(url: string): boolean {
   try {
     const host = new URL(url).hostname.toLowerCase();
-    return host.includes("github.com") || host.includes("gitlab.");
+    return host === "github.com" || host.endsWith(".github.com") || host.includes("gitlab.");
   } catch {
     return false;
-  }
-}
-
-/** Flag cloneable sources in search results. Mutates in place. */
-function flagCloneableSources(result: SearchResult): void {
-  for (const source of result.sources) {
-    if (isCloneableUrl(source.url)) {
-      source.cloneable = true;
-    }
   }
 }
 
 /**
  * Format a SearchResult as a readable string for the LLM.
  *
- * The Gemini provider already embeds a Sources block in `answer` with inline
- * citations. To avoid duplicating it, we only append our own Sources block
- * (with cloneable tags) when the provider didn't already include one.
+ * Always appends a Sources block with cloneable tags. The provider layer
+ * returns raw answer text without sources formatting — this function owns
+ * the final output shape.
+ *
+ * @internal Exported for testing.
  */
-function formatResultForLLM(result: SearchResult): string {
+export function formatResultForLLM(result: SearchResult): string {
   const header = `## Search Results (via ${result.provider})`;
-  const body = result.answer;
 
-  if (result.sources.length === 0) return `${header}\n\n${body}`;
-
-  // Gemini's answer already contains a "Sources:" section with inline
-  // citation markers. Appending a second one would duplicate it.
-  // Only add our own Sources block when the answer doesn't have one.
-  const hasSourcesBlock = body.includes("\nSources:\n");
-
-  if (hasSourcesBlock) {
-    // Still want cloneable tags — append them as a supplement.
-    const cloneableSources = result.sources.filter((s) => s.cloneable);
-    const cloneableSection =
-      cloneableSources.length > 0
-        ? `\n\nCloneable repositories:\n${cloneableSources.map((s) => `- ${s.url}`).join("\n")}`
-        : "";
-
-    return `${header}\n\n${body}${cloneableSection}`;
-  }
+  if (result.sources.length === 0) return `${header}\n\n${result.answer}`;
 
   const sourcesList = result.sources
     .map((s, i) => {
-      const tag = s.cloneable ? " [cloneable]" : "";
+      const tag = isCloneableUrl(s.url) ? " [cloneable]" : "";
       return `[${i + 1}] ${s.title} (${s.url})${tag}`;
     })
     .join("\n");
 
-  return `${header}\n\n${body}\n\nSources:\n${sourcesList}`;
+  const cloneableSources = result.sources.filter((s) => isCloneableUrl(s.url));
+  const cloneableSection =
+    cloneableSources.length > 0
+      ? `\n\nCloneable repositories:\n${cloneableSources.map((s) => `- ${s.url}`).join("\n")}`
+      : "";
+
+  return `${header}\n\n${result.answer}\n\nSources:\n${sourcesList}${cloneableSection}`;
 }
 
 /** Build the set of available providers from config. Called once at init. */
@@ -182,13 +168,20 @@ export function createWebSearchTool(config: WebAccessConfig): ToolDefinition {
               title: `Searching via ${provider.name}...`,
             });
 
-            const result = await provider.search(args.query, {
-              ...(args.numResults != null ? { numResults: args.numResults } : {}),
-              ...(args.includeContent != null ? { includeContent: args.includeContent } : {}),
+            // Build options based on provider capabilities.
+            // All providers accept ExaSearchOptions (extends SearchOptions) —
+            // non-Exa providers simply ignore the extra fields.
+            const searchOpts: ExaSearchOptions = {
               signal: context.abort,
-            });
+              ...(provider.capabilities.numResults && args.numResults != null
+                ? { numResults: args.numResults }
+                : {}),
+              ...(provider.capabilities.includeContent && args.includeContent != null
+                ? { includeContent: args.includeContent }
+                : {}),
+            };
 
-            flagCloneableSources(result);
+            const result = await provider.search(args.query, searchOpts);
 
             return formatResultForLLM(result);
           } catch (err) {

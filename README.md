@@ -58,7 +58,31 @@ Restart opencode. The plugin auto-installs from npm.
 
 ## Configure
 
-Scout reads configuration from two sources. Both are optional.
+Scout reads configuration from three sources, in order of precedence:
+
+1. **Environment variables** — for secrets (API keys). Highest priority.
+2. **`opencode.jsonc` plugin options** — for per-project settings.
+3. **`~/.config/opencode/web-access.json`** — for machine-wide defaults.
+
+All sources are optional. Settings merge: a value from a higher-priority source overrides the same key from a lower-priority one.
+
+### opencode.jsonc (recommended)
+
+Add options as the second element of the plugin tuple:
+
+```jsonc
+{
+  "plugin": [
+    ["opencode-scout", {
+      "provider": "auto",
+      "gemini": { "model": "gemini-2.5-flash" },
+      "clone": { "timeoutSeconds": 60 }
+    }]
+  ]
+}
+```
+
+> **Note:** API keys should be set via environment variables, not in `opencode.jsonc` — the config file may be committed to git.
 
 ### Environment variables
 
@@ -68,7 +92,7 @@ export TINYFISH_API_KEY="your-tinyfish-api-key"
 export GEMINI_API_KEY="your-gemini-api-key"
 ```
 
-### Config file
+### Config file (machine-wide fallback)
 
 `~/.config/opencode/web-access.json`:
 
@@ -82,13 +106,13 @@ export GEMINI_API_KEY="your-gemini-api-key"
     "model": "gemini-2.5-flash"
   },
   "clone": {
-    "cachePath": "~/.cache/opencode/repos",
+    "cachePath": "/Users/you/.cache/opencode/repos",
     "timeoutSeconds": 60
   }
 }
 ```
 
-All fields are optional. Env vars override file values. Empty env vars are treated as unset.
+All fields are optional.
 
 ### What works without configuration
 
@@ -212,10 +236,6 @@ Gemini returns a synthesized answer with inline citation markers (`[1][2]`) and 
 - Default model: `gemini-2.5-flash` (configurable)
 - `numResults` and `includeContent` are not supported. Use `webfetch` on source URLs to get full page content.
 - Best for: questions that benefit from synthesized answers, when you want a direct answer rather than a list of pages
-
-### Planned
-
-Perplexity and OpenRouter providers are planned for a future release. The config file accepts `perplexityApiKey` and `openrouterApiKey` (and their env var equivalents `PERPLEXITY_API_KEY`, `OPENROUTER_API_KEY`), but no provider uses them yet.
 
 ## System Prompt
 

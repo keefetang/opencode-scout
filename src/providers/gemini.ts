@@ -1,4 +1,4 @@
-import type { SearchOptions, SearchProvider, SearchResult } from "./types.ts";
+import type { ExaSearchOptions, SearchProvider, SearchResult } from "./types.ts";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -142,12 +142,18 @@ export function createGeminiProvider(
   apiKey: string,
   model: string,
 ): SearchProvider {
+  // Sanitize model name — only allow alphanumeric, dots, hyphens, underscores.
+  // Prevents path traversal if someone sets model to "../../something".
+  const safeModel = model.replace(/[^a-zA-Z0-9._-]/g, "");
+  if (!safeModel) {
+    throw new Error("Invalid Gemini model name: must contain alphanumeric characters");
+  }
+
   return {
     name: "gemini",
+    capabilities: { includeContent: false, numResults: false },
 
-    // numResults is ignored — Gemini's grounding API controls its own
-    // source count. The option only applies to Exa.
-    async search(query: string, options: SearchOptions): Promise<SearchResult> {
+    async search(query: string, options: ExaSearchOptions): Promise<SearchResult> {
       const signal = AbortSignal.any([
         AbortSignal.timeout(options.timeoutMs ?? 30_000),
         ...(options.signal ? [options.signal] : []),
@@ -155,7 +161,7 @@ export function createGeminiProvider(
 
       // ----- 1. Call the Gemini API with search grounding -----
 
-      const url = `${API_BASE}/models/${model}:generateContent`;
+      const url = `${API_BASE}/models/${safeModel}:generateContent`;
 
       const res = await fetch(url, {
         method: "POST",
@@ -246,16 +252,9 @@ export function createGeminiProvider(
         annotatedText = insertMarkersByUtf8Index(answerText, insertions);
       }
 
-      // ----- 6. Build Sources list -----
-
-      if (resolvedSources.length > 0) {
-        const sourcesList = resolvedSources
-          .map((s, i) => `[${i + 1}] ${s.title}${s.title ? " " : ""}(${s.url})`)
-          .join("\n");
-        annotatedText += `\n\nSources:\n${sourcesList}`;
-      }
-
-      // ----- 7. Return SearchResult -----
+      // ----- 6. Return SearchResult -----
+      // Sources block is added by the tool layer (formatResultForLLM),
+      // not here — keeps provider output consistent across all providers.
 
       return {
         answer: annotatedText,

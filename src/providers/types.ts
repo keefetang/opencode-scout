@@ -1,14 +1,24 @@
-export interface SearchProvider {
-  name: string;
-  search(query: string, options: SearchOptions): Promise<SearchResult>;
-}
-
 export interface SearchOptions {
-  numResults?: number;
   signal?: AbortSignal;
   timeoutMs?: number;
-  /** Fetch full page content from sources (Exa only). */
+}
+
+export interface ExaSearchOptions extends SearchOptions {
+  numResults?: number;
   includeContent?: boolean;
+}
+
+export interface ProviderCapabilities {
+  /** Supports fetching full page content in search results */
+  includeContent: boolean;
+  /** Supports limiting number of results */
+  numResults: boolean;
+}
+
+export interface SearchProvider {
+  name: string;
+  capabilities: ProviderCapabilities;
+  search(query: string, options: ExaSearchOptions): Promise<SearchResult>;
 }
 
 export interface SearchResult {
@@ -17,8 +27,6 @@ export interface SearchResult {
     title: string;
     url: string;
     snippet?: string;
-    /** True if URL is a GitHub/GitLab repository. */
-    cloneable?: boolean;
   }>;
   provider: string;
 }

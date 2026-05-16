@@ -1,8 +1,8 @@
 import type { Plugin } from "@opencode-ai/plugin";
 
-import { loadConfig, type WebAccessConfig } from "./config";
-import { createCloneRepoTool } from "./tools/clone-repo";
-import { createWebSearchTool } from "./tools/web-search";
+import { loadConfig, type WebAccessConfig } from "./config.ts";
+import { createCloneRepoTool } from "./tools/clone-repo.ts";
+import { createWebSearchTool } from "./tools/web-search.ts";
 
 /**
  * OpenCode Scout plugin.
@@ -11,7 +11,7 @@ import { createWebSearchTool } from "./tools/web-search";
  * and git clone for pulling repositories into the workspace.
  */
 export const ScoutPlugin: Plugin = async (ctx, options) => {
-  const config = loadConfig();
+  const config = loadConfig(options);
 
   const webSearchTool = createWebSearchTool(config);
   const cloneRepoTool = createCloneRepoTool(config);

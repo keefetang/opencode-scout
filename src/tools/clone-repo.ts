@@ -1,19 +1,15 @@
 import { createHash } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  statSync,
-} from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { spawn } from "node:child_process";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 import { tool } from "@opencode-ai/plugin/tool";
 import type { ToolDefinition } from "@opencode-ai/plugin/tool";
 
 import type { WebAccessConfig } from "../config.ts";
-import { normalizeRepoUrl } from "../git/url-normalizer";
+import { cloneRepo } from "../git/clone.ts";
+import { isPathWithinRoot, isRealPathWithinRoot } from "../git/path-safety.ts";
+import { runCommand } from "../git/subprocess.ts";
+import { normalizeRepoUrl } from "../git/url-normalizer.ts";
 
 const z = tool.schema;
 
@@ -80,45 +76,21 @@ export function createCloneRepoTool(config: WebAccessConfig): ToolDefinition {
             title: `Cloning ${normalized.repoPath}...`,
           });
 
-          // Ensure parent directory exists
-          mkdirSync(config.clone.cachePath, { recursive: true });
-
-          // Remove stale cache if force-recloning
-          if (existsSync(cacheDir)) {
-            // Safety: only rm inside the expected cache directory
-            const resolvedCacheDir = resolve(cacheDir);
-            const resolvedCacheRoot = resolve(config.clone.cachePath);
-            if (!resolvedCacheDir.startsWith(resolvedCacheRoot + "/")) {
-              return "Error: Cache directory path is outside expected cache root. Aborting.";
-            }
-            await runCommand("rm", ["-rf", cacheDir], {
-              timeoutMs: 10_000,
+          const result = await cloneRepo(
+            normalized.cloneUrl,
+            cacheDir,
+            config.clone.cachePath,
+            branch,
+            {
+              timeoutMs: config.clone.timeoutSeconds * 1000,
+              forceReclone: args.forceReclone === true,
+              host: normalized.host,
               signal: context.abort,
-            });
-          }
-
-          const cloneArgs = [
-            "clone",
-            "--depth",
-            "1",
-            "--single-branch",
-          ];
-          if (branch) {
-            cloneArgs.push("--branch", branch);
-          }
-          cloneArgs.push("--", normalized.cloneUrl, cacheDir);
-
-          const result = await runCommand("git", cloneArgs, {
-            timeoutMs: config.clone.timeoutSeconds * 1000,
-            signal: context.abort,
-          });
+            },
+          );
 
           if (!result.success) {
-            return formatCloneError(
-              result.stderr,
-              normalized.cloneUrl,
-              normalized.host,
-            );
+            return result.error;
           }
         }
 
@@ -220,169 +192,8 @@ export function createCloneRepoTool(config: WebAccessConfig): ToolDefinition {
 }
 
 // ---------------------------------------------------------------------------
-// Path safety helpers
+// Response-assembly helpers
 // ---------------------------------------------------------------------------
-
-/**
- * String-level check: does `target` resolve within `root`?
- * Catches `..` traversal. Does NOT follow symlinks.
- */
-function isPathWithinRoot(target: string, root: string): boolean {
-  const resolvedTarget = resolve(target);
-  const resolvedRoot = resolve(root);
-  return (
-    resolvedTarget === resolvedRoot ||
-    resolvedTarget.startsWith(resolvedRoot + "/")
-  );
-}
-
-/**
- * Filesystem-level check: does `target`'s real path (symlinks resolved)
- * stay within `root`? Both paths must exist on disk.
- * Returns `false` if either path doesn't exist.
- */
-function isRealPathWithinRoot(target: string, root: string): boolean {
-  try {
-    const realTarget = realpathSync(target);
-    const realRoot = realpathSync(root);
-    return (
-      realTarget === realRoot || realTarget.startsWith(realRoot + "/")
-    );
-  } catch {
-    // Path doesn't exist — safe to reject.
-    return false;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-interface CommandResult {
-  success: boolean;
-  stdout: string;
-  stderr: string;
-  code: number | null;
-}
-
-/**
- * Run a command via `spawn`, collecting stdout/stderr.
- *
- * Uses `setTimeout` + `process.kill()` for timeout (macOS has no `timeout`
- * command). Respects the abort signal from the tool context.
- */
-function runCommand(
-  cmd: string,
-  args: string[],
-  opts: { timeoutMs: number; signal?: AbortSignal | undefined },
-): Promise<CommandResult> {
-  return new Promise((resolve) => {
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-
-    const child = spawn(cmd, args, {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
-    child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
-
-    // Timeout
-    let killTimer: ReturnType<typeof setTimeout> | undefined;
-    const timer = setTimeout(() => {
-      child.kill("SIGTERM");
-      // Give it a moment then SIGKILL
-      killTimer = setTimeout(() => {
-        if (!child.killed) child.kill("SIGKILL");
-      }, 2000);
-    }, opts.timeoutMs);
-
-    // Abort signal from context
-    const onAbort = (): void => {
-      child.kill("SIGTERM");
-    };
-    opts.signal?.addEventListener("abort", onAbort, { once: true });
-
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (killTimer) clearTimeout(killTimer);
-      opts.signal?.removeEventListener("abort", onAbort);
-
-      resolve({
-        success: code === 0,
-        stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
-        stderr: Buffer.concat(stderrChunks).toString("utf-8"),
-        code,
-      });
-    });
-
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      if (killTimer) clearTimeout(killTimer);
-      opts.signal?.removeEventListener("abort", onAbort);
-
-      resolve({
-        success: false,
-        stdout: "",
-        stderr: err.message,
-        code: null,
-      });
-    });
-  });
-}
-
-/** Produce a human-readable clone error message. */
-function formatCloneError(
-  stderr: string,
-  cloneUrl: string,
-  host: string,
-): string {
-  const lower = stderr.toLowerCase();
-
-  if (
-    lower.includes("could not resolve host") ||
-    lower.includes("name or service not known")
-  ) {
-    return (
-      `Error: Could not resolve host for ${cloneUrl}. ` +
-      "Check the URL and your network connection."
-    );
-  }
-
-  if (
-    lower.includes("permission denied") ||
-    lower.includes("authentication failed") ||
-    lower.includes("could not read from remote")
-  ) {
-    const hint =
-      host === "github.com"
-        ? "For private GitHub repos, ensure SSH keys are configured (git@github.com:...)."
-        : `Ensure your SSH key has access to ${host}.`;
-    return `Error: Authentication failed for ${cloneUrl}. ${hint}`;
-  }
-
-  if (
-    lower.includes("not found") ||
-    lower.includes("does not exist") ||
-    lower.includes("repository not found")
-  ) {
-    return `Error: Repository not found: ${cloneUrl}. Check the URL is correct.`;
-  }
-
-  if (
-    lower.includes("remote branch") &&
-    lower.includes("not found")
-  ) {
-    return `Error: Branch not found in ${cloneUrl}. Check the branch name.`;
-  }
-
-  if (lower.includes("signal") || lower.includes("killed")) {
-    return `Error: Clone timed out or was cancelled for ${cloneUrl}.`;
-  }
-
-  // Generic fallback
-  return `Error: git clone failed for ${cloneUrl}.\n${stderr.trim()}`;
-}
 
 /**
  * Run `tree` on a directory. Returns null if tree is not installed.
@@ -423,18 +234,32 @@ function findAndReadReadme(dir: string): string | undefined {
   return undefined;
 }
 
+/** Check if a buffer likely contains binary content (null bytes in first 8KB). */
+function isBinaryContent(buf: Buffer): boolean {
+  const checkLen = Math.min(buf.length, 8192);
+  for (let i = 0; i < checkLen; i++) {
+    if (buf[i] === 0) return true;
+  }
+  return false;
+}
+
 /**
  * Read a file, truncating if too large. Returns a string safe for
- * inclusion in tool output.
+ * inclusion in tool output. Detects binary files via null-byte scan.
  */
 function readFileSafe(filePath: string): string {
   try {
     const stat = statSync(filePath);
-    // Skip binary / very large files
+    // Skip very large files
     if (stat.size > 512 * 1024) {
       return `(file too large: ${Math.round(stat.size / 1024)}KB — use \`read\` tool to view specific sections)`;
     }
-    const content = readFileSync(filePath, "utf-8");
+    const buf = readFileSync(filePath);
+    // Skip binary files — null bytes in first 8KB indicate non-text content
+    if (isBinaryContent(buf)) {
+      return `(binary file: ${Math.round(stat.size / 1024)}KB — use \`read\` tool if needed)`;
+    }
+    const content = buf.toString("utf-8");
     // Truncate by line count for the tool response
     const lines = content.split("\n");
     if (lines.length > 500) {

@@ -1,4 +1,4 @@
-import type { SearchOptions, SearchProvider, SearchResult } from "./types.ts";
+import type { ExaSearchOptions, SearchProvider, SearchResult } from "./types.ts";
 
 const TINYFISH_API_URL = "https://api.search.tinyfish.ai";
 
@@ -46,8 +46,9 @@ function formatAnswer(results: TinyFishResult[]): string {
 export function createTinyFishProvider(apiKey: string): SearchProvider {
   return {
     name: "tinyfish",
+    capabilities: { includeContent: false, numResults: false },
 
-    async search(query: string, options: SearchOptions): Promise<SearchResult> {
+    async search(query: string, options: ExaSearchOptions): Promise<SearchResult> {
       const params = new URLSearchParams({ query });
 
       const signal = AbortSignal.any([
