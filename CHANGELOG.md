@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.1] — 2026-05-16
+
+### Added
+- AGENTS.md
+- MIT LICENSE
+
+### Changed
+- Standardized .gitignore
+
 ## [0.3.0] — 2026-05-16
 
 ### Architecture
