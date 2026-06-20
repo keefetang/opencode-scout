@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: write # needed for GitHub Release creation
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
